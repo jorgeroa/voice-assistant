@@ -45,7 +45,7 @@ class AppSettings(BaseSettings):
     # VAD
     vad_threshold: float = 0.5
     silence_duration_ms: int = 800
-    audio_chunk_ms: int = 250
+    audio_chunk_ms: int = 32
 
     # Audio
     sample_rate: int = 16000

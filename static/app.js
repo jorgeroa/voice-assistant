@@ -2,8 +2,8 @@
 // Handles mic capture, audio playback, and server communication.
 
 const SAMPLE_RATE = 16000;
-const CHUNK_DURATION_MS = 250;
-const CHUNK_SIZE = (SAMPLE_RATE * CHUNK_DURATION_MS) / 1000; // 4000 samples
+const CHUNK_DURATION_MS = 32;
+const CHUNK_SIZE = 512; // power of 2 for createScriptProcessor + Silero VAD compatible
 
 class VoiceApp {
     constructor() {

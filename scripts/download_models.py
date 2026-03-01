@@ -7,10 +7,10 @@ from pathlib import Path
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 
-KOKORO_REPO = "hexgrad/Kokoro-82M"
+KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_FILES = {
-    "kokoro-v1.0.onnx": f"https://huggingface.co/{KOKORO_REPO}/resolve/main/kokoro-v1.0.onnx",
-    "voices-v1.0.bin": f"https://huggingface.co/{KOKORO_REPO}/resolve/main/voices-v1.0.bin",
+    "kokoro-v1.0.onnx": f"{KOKORO_RELEASE}/kokoro-v1.0.onnx",
+    "voices-v1.0.bin": f"{KOKORO_RELEASE}/voices-v1.0.bin",
 }
 
 
