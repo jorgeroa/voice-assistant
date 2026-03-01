@@ -14,6 +14,7 @@ class VoiceApp {
         this.languageSelect = document.getElementById("language");
         this.inputModeSelect = document.getElementById("input-mode");
         this.sttModeSelect = document.getElementById("stt-mode");
+        this.voiceSelect = document.getElementById("voice");
         this.vadMeter = document.getElementById("vad-meter");
         this.vadFill = document.getElementById("vad-fill");
 
@@ -98,6 +99,9 @@ class VoiceApp {
         this.sttModeSelect.addEventListener("change", () => {
             this.send({ type: "set_stt_mode", mode: this.sttModeSelect.value });
         });
+        this.voiceSelect.addEventListener("change", () => {
+            this.send({ type: "set_voice", voice: this.voiceSelect.value });
+        });
 
         // Keyboard shortcut: Space for PTT
         document.addEventListener("keydown", (e) => {
@@ -169,6 +173,9 @@ class VoiceApp {
                 break;
             case "turn_complete":
                 this.onTurnComplete();
+                break;
+            case "voices":
+                this.populateVoices(data.voices, data.current);
                 break;
             case "error":
                 this.setStatus(`Error: ${data.message}`);
@@ -305,6 +312,17 @@ class VoiceApp {
         this.isProcessing = isProcessing;
         this.micBtn.classList.toggle("processing", isProcessing);
         this.micBtn.disabled = isProcessing;
+    }
+
+    populateVoices(voices, current) {
+        this.voiceSelect.innerHTML = "";
+        for (const v of voices) {
+            const opt = document.createElement("option");
+            opt.value = v.id;
+            opt.textContent = v.label;
+            if (v.id === current) opt.selected = true;
+            this.voiceSelect.appendChild(opt);
+        }
     }
 
     updateVADMeter(probability) {

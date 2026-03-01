@@ -10,7 +10,7 @@ from collections.abc import Callable
 import numpy as np
 
 from config.settings import AppSettings
-from config.voices import LANGUAGE_CODES
+from config.voices import LANGUAGE_CODES, VOICES
 from core.conversation import ConversationManager
 from core.llm import LLMClient
 from core.stt import SpeechToText
@@ -87,6 +87,10 @@ class ConversationSession:
                 mode = data.get("mode", "fast")
                 self.stt_mode = mode
                 self.stt.set_mode(mode)
+            elif msg_type == "set_voice":
+                voice = data.get("voice", "")
+                if voice:
+                    self.tts.set_voice(voice, self.language)
             else:
                 logger.warning("Unknown message type: %s", msg_type)
         except Exception as e:
@@ -238,4 +242,19 @@ class ConversationSession:
         self.stt.set_language(language)
         self.llm.set_system_prompt(self.settings.system_prompt)
         self.tts.set_voice(self.settings.tts_voice, language)
+        await self._send_voices()
         await self._send({"type": "status", "message": f"Language set to {language}"})
+
+    async def _send_voices(self):
+        """Send available voices for the current language to the client."""
+        lang_voices = VOICES.get(self.language, {})
+        voice_list = []
+        for gender in ("female", "male"):
+            for vid in lang_voices.get(gender, []):
+                label = vid.split("_", 1)[1].title() + f" ({gender[0].upper()})"
+                voice_list.append({"id": vid, "label": label})
+        await self._send({
+            "type": "voices",
+            "voices": voice_list,
+            "current": self.tts.voice,
+        })
