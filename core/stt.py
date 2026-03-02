@@ -221,7 +221,11 @@ class SpeechToText:
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
         if self.mode == "quality":
-            return self._quality.transcribe(audio, sample_rate)
+            try:
+                return self._quality.transcribe(audio, sample_rate)
+            except ImportError:
+                logger.warning("whisperx not installed, falling back to fast mode")
+                self.mode = "fast"
         return self._fast.transcribe(audio, sample_rate)
 
     def set_mode(self, mode: str):

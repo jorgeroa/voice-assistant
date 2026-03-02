@@ -138,6 +138,15 @@ class ConversationSession:
 
     async def _process_utterance(self, audio: np.ndarray):
         """Full pipeline: STT → LLM → TTS."""
+        duration = len(audio) / self.settings.sample_rate
+        logger.info("Processing utterance: %.2fs, %d samples", duration, len(audio))
+
+        if duration < 0.3:
+            logger.info("Audio too short (%.2fs), skipping STT", duration)
+            await self._send({"type": "status", "message": "Recording too short — hold the mic button longer."})
+            await self._send({"type": "turn_complete"})
+            return
+
         await self._send({"type": "status", "message": "Transcribing..."})
 
         # Run STT in a thread to avoid blocking the event loop
@@ -148,6 +157,7 @@ class ConversationSession:
 
         if not result.text.strip():
             await self._send({"type": "status", "message": "No speech detected."})
+            await self._send({"type": "turn_complete"})
             return
 
         # Send transcript to client
