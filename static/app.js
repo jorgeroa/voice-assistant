@@ -29,6 +29,8 @@ class VoiceApp {
         this.currentAssistantEl = null;
         this.audioQueue = [];
         this.isPlayingAudio = false;
+        this.currentSource = null; // active BufferSource for stop support
+        this.activeGenId = null;   // generation ID for barge-in filtering
 
         // Playback context (separate from capture to avoid conflicts)
         this.playbackCtx = null;
@@ -44,8 +46,11 @@ class VoiceApp {
     bindEvents() {
         // Mic button: PTT uses mousedown/up, VAD uses click toggle
         this.micBtn.addEventListener("mousedown", (e) => {
-            if (this.inputMode === "ptt" && !this.isProcessing) {
+            if (this.inputMode === "ptt" && (!this.isProcessing || this.isPlayingAudio)) {
                 e.preventDefault();
+                if (this.isPlayingAudio) {
+                    this.interruptPlayback();
+                }
                 this.startRecording();
             }
         });
@@ -72,8 +77,11 @@ class VoiceApp {
 
         // Touch support for mobile PTT
         this.micBtn.addEventListener("touchstart", (e) => {
-            if (this.inputMode === "ptt" && !this.isProcessing) {
+            if (this.inputMode === "ptt" && (!this.isProcessing || this.isPlayingAudio)) {
                 e.preventDefault();
+                if (this.isPlayingAudio) {
+                    this.interruptPlayback();
+                }
                 this.startRecording();
             }
         });
@@ -106,9 +114,12 @@ class VoiceApp {
         // Keyboard shortcut: Space for PTT
         document.addEventListener("keydown", (e) => {
             if (e.code === "Space" && this.inputMode === "ptt" &&
-                !this.isRecording && !this.isProcessing &&
+                !this.isRecording && (!this.isProcessing || this.isPlayingAudio) &&
                 e.target.tagName !== "SELECT") {
                 e.preventDefault();
+                if (this.isPlayingAudio) {
+                    this.interruptPlayback();
+                }
                 this.startRecording();
             }
         });
@@ -161,6 +172,9 @@ class VoiceApp {
                 break;
             case "vad_status":
                 this.updateVADMeter(data.probability);
+                if (data.is_speech && this.isPlayingAudio) {
+                    this.interruptPlayback();
+                }
                 break;
             case "transcript":
                 this.addUserMessage(data.text, data.speaker, data.processing_time);
@@ -169,7 +183,10 @@ class VoiceApp {
                 this.appendAssistantChunk(data.text);
                 break;
             case "audio_response":
-                this.queueAudio(data.data, data.sample_rate);
+                this.queueAudio(data.data, data.sample_rate, data.gen_id);
+                break;
+            case "interrupt_ack":
+                this.activeGenId = null;
                 break;
             case "turn_complete":
                 this.onTurnComplete();
@@ -263,7 +280,33 @@ class VoiceApp {
 
     // --- Audio Playback ---
 
-    queueAudio(base64Data, sampleRate) {
+    interruptPlayback() {
+        this.stopPlayback();
+        this.send({ type: "interrupt" });
+        this.setProcessing(false);
+        if (this.currentAssistantEl) {
+            this.currentAssistantEl.classList.remove("streaming");
+            this.currentAssistantEl = null;
+        }
+    }
+
+    stopPlayback() {
+        this.audioQueue = [];
+        if (this.currentSource) {
+            try {
+                this.currentSource.onended = null;
+                this.currentSource.stop();
+            } catch (e) { /* already stopped */ }
+            this.currentSource = null;
+        }
+        this.isPlayingAudio = false;
+        this.activeGenId = null;
+    }
+
+    queueAudio(base64Data, sampleRate, genId) {
+        // Ignore audio from interrupted generations
+        if (this.activeGenId !== null && genId !== this.activeGenId) return;
+        if (this.activeGenId === null) this.activeGenId = genId;
         this.audioQueue.push({ data: base64Data, sampleRate });
         if (!this.isPlayingAudio) {
             this.playNextAudio();
@@ -273,6 +316,7 @@ class VoiceApp {
     async playNextAudio() {
         if (this.audioQueue.length === 0) {
             this.isPlayingAudio = false;
+            this.currentSource = null;
             return;
         }
         this.isPlayingAudio = true;
@@ -299,6 +343,7 @@ class VoiceApp {
         source.buffer = buffer;
         source.connect(this.playbackCtx.destination);
         source.onended = () => this.playNextAudio();
+        this.currentSource = source;
         source.start();
     }
 
@@ -364,6 +409,7 @@ class VoiceApp {
             this.currentAssistantEl.classList.remove("streaming");
             this.currentAssistantEl = null;
         }
+        this.activeGenId = null;
         this.setProcessing(false);
         this.setStatus("Ready.");
     }

@@ -37,6 +37,10 @@ class ConversationSession:
         self._audio_buffer: list[np.ndarray] = []
         self._is_recording = False
 
+        # Generation state for barge-in support
+        self._generation_task: asyncio.Task | None = None
+        self._generation_id: int = 0
+
         # Components
         self.vad = VoiceActivityDetector(
             threshold=settings.vad_threshold,
@@ -75,7 +79,11 @@ class ConversationSession:
         try:
             if msg_type == "audio_chunk":
                 await self._handle_audio_chunk(data)
+            elif msg_type == "interrupt":
+                await self._interrupt()
             elif msg_type == "start_recording":
+                if self._generation_task and not self._generation_task.done():
+                    await self._interrupt()
                 self._start_recording()
             elif msg_type == "stop_recording":
                 await self._stop_recording()
@@ -102,6 +110,18 @@ class ConversationSession:
         self._audio_buffer.clear()
         self._is_recording = True
         self.vad.reset()
+
+    async def _interrupt(self):
+        """Cancel active generation (barge-in)."""
+        if self._generation_task and not self._generation_task.done():
+            self._generation_task.cancel()
+            try:
+                await self._generation_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Generation interrupted by user")
+        self._generation_task = None
+        await self._send({"type": "interrupt_ack"})
 
     async def _stop_recording(self):
         """Stop recording and process utterance (push-to-talk)."""
@@ -188,11 +208,13 @@ class ConversationSession:
             audio_duration=result.duration,
         )
 
-        # Generate LLM response with streaming TTS
+        # Generate LLM response with streaming TTS (as background task for barge-in)
         await self._send({"type": "status", "message": "Thinking..."})
-        await self._generate_and_speak(loop)
+        self._generation_id += 1
+        gen_id = self._generation_id
+        self._generation_task = asyncio.create_task(self._generate_and_speak(loop, gen_id))
 
-    async def _generate_and_speak(self, loop: asyncio.AbstractEventLoop):
+    async def _generate_and_speak(self, loop: asyncio.AbstractEventLoop, gen_id: int):
         """Stream LLM response, chunk by sentence, synthesize and send audio."""
         messages = self.conversation.get_openai_messages()
         full_response = ""
@@ -201,37 +223,49 @@ class ConversationSession:
         def _stream_llm():
             return list(self.llm.stream_response(messages))
 
-        # Get all LLM chunks (run in thread since OpenAI SDK is sync)
-        # We process them as they come for text streaming, then TTS in batches
-        chunks = await loop.run_in_executor(None, _stream_llm)
+        try:
+            # Get all LLM chunks (run in thread since OpenAI SDK is sync)
+            chunks = await loop.run_in_executor(None, _stream_llm)
 
-        for text_chunk in chunks:
-            full_response += text_chunk
-            sentence_buffer += text_chunk
+            for text_chunk in chunks:
+                if self._generation_id != gen_id:
+                    break
+                full_response += text_chunk
+                sentence_buffer += text_chunk
 
-            # Stream text to client
-            await self._send({"type": "llm_chunk", "text": text_chunk})
+                # Stream text to client
+                await self._send({"type": "llm_chunk", "text": text_chunk})
 
-            # Check for sentence boundary with minimum length
-            if _SENTENCE_BOUNDARY.search(text_chunk) and len(sentence_buffer.strip()) > 10:
-                await self._synthesize_and_send(loop, sentence_buffer.strip())
-                sentence_buffer = ""
+                # Check for sentence boundary with minimum length
+                if _SENTENCE_BOUNDARY.search(text_chunk) and len(sentence_buffer.strip()) > 10:
+                    await self._synthesize_and_send(loop, sentence_buffer.strip(), gen_id)
+                    sentence_buffer = ""
 
-        # Flush remaining text
-        if sentence_buffer.strip():
-            await self._synthesize_and_send(loop, sentence_buffer.strip())
+            # Flush remaining text
+            if sentence_buffer.strip() and self._generation_id == gen_id:
+                await self._synthesize_and_send(loop, sentence_buffer.strip(), gen_id)
 
-        self.conversation.add_assistant_turn(full_response, self.language)
-        await self._send({"type": "turn_complete"})
+            self.conversation.add_assistant_turn(full_response, self.language)
+        except asyncio.CancelledError:
+            # Interrupted — save partial response to conversation
+            if full_response.strip():
+                self.conversation.add_assistant_turn(full_response, self.language)
+            logger.info("Generation task cancelled (gen_id=%d)", gen_id)
+            return
 
-    async def _synthesize_and_send(self, loop: asyncio.AbstractEventLoop, text: str):
+        if self._generation_id == gen_id:
+            await self._send({"type": "turn_complete"})
+
+    async def _synthesize_and_send(self, loop: asyncio.AbstractEventLoop, text: str, gen_id: int):
         """Synthesize text and send audio to client."""
+        if self._generation_id != gen_id:
+            return
 
         def _synth():
             return self.tts.synthesize(text)
 
         samples, sr = await loop.run_in_executor(None, _synth)
-        if len(samples) == 0:
+        if len(samples) == 0 or self._generation_id != gen_id:
             return
 
         # Convert float32 [-1,1] to int16 for transmission
@@ -241,6 +275,7 @@ class ConversationSession:
             "type": "audio_response",
             "data": audio_b64,
             "sample_rate": sr,
+            "gen_id": gen_id,
         })
 
     async def _set_language(self, language: str):
