@@ -42,6 +42,7 @@ async def conversation_ws(websocket: WebSocket):
     try:
         await send_json({"type": "status", "message": "Connected. Ready to talk."})
         await session._send_voices()
+        await session._send_backends()
 
         while True:
             raw = await websocket.receive_text()

@@ -15,6 +15,7 @@ class VoiceApp {
         this.inputModeSelect = document.getElementById("input-mode");
         this.sttModeSelect = document.getElementById("stt-mode");
         this.voiceSelect = document.getElementById("voice");
+        this.ttsBackendSelect = document.getElementById("tts-backend");
         this.vadMeter = document.getElementById("vad-meter");
         this.vadFill = document.getElementById("vad-fill");
 
@@ -110,6 +111,9 @@ class VoiceApp {
         this.voiceSelect.addEventListener("change", () => {
             this.send({ type: "set_voice", voice: this.voiceSelect.value });
         });
+        this.ttsBackendSelect.addEventListener("change", () => {
+            this.send({ type: "set_tts_backend", backend: this.ttsBackendSelect.value });
+        });
 
         // Keyboard shortcut: Space for PTT
         document.addEventListener("keydown", (e) => {
@@ -193,6 +197,11 @@ class VoiceApp {
                 break;
             case "voices":
                 this.populateVoices(data.voices, data.current);
+                break;
+            case "tts_backends":
+                this.populateBackends(data.backends, data.current);
+                break;
+            case "tts_backend_changed":
                 break;
             case "error":
                 this.setStatus(`Error: ${data.message}`);
@@ -357,6 +366,22 @@ class VoiceApp {
         this.isProcessing = isProcessing;
         this.micBtn.classList.toggle("processing", isProcessing);
         this.micBtn.disabled = isProcessing;
+    }
+
+    populateBackends(backends, current) {
+        const labels = {
+            kokoro: "Kokoro (Local)",
+            openai: "OpenAI TTS",
+            fish: "Fish Audio",
+        };
+        this.ttsBackendSelect.innerHTML = "";
+        for (const b of backends) {
+            const opt = document.createElement("option");
+            opt.value = b;
+            opt.textContent = labels[b] || b;
+            if (b === current) opt.selected = true;
+            this.ttsBackendSelect.appendChild(opt);
+        }
     }
 
     populateVoices(voices, current) {

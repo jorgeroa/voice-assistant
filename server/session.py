@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import logging
 import re
 from collections.abc import Callable
@@ -10,11 +9,13 @@ from collections.abc import Callable
 import numpy as np
 
 from config.settings import AppSettings
-from config.voices import LANGUAGE_CODES, VOICES
+from config.voices import LANGUAGE_CODES
 from core.conversation import ConversationManager
 from core.llm import LLMClient
 from core.stt import SpeechToText
-from core.tts import TextToSpeech
+from core.tts import KokoroTTS
+from core.tts_manager import TTSManager
+from core.tts_openai import OpenAITTS
 from core.vad import VADState, VoiceActivityDetector
 
 logger = logging.getLogger(__name__)
@@ -64,14 +65,33 @@ class ConversationSession:
             system_prompt=settings.system_prompt,
             max_turns=settings.max_conversation_turns,
         )
-        self.tts = TextToSpeech(
+        self.tts = self._build_tts_manager(settings)
+        self.conversation = ConversationManager(max_turns=settings.max_conversation_turns)
+
+    @staticmethod
+    def _build_tts_manager(settings: AppSettings) -> TTSManager:
+        from core.tts_fish import FishAudioTTS
+
+        backends = {}
+        backends["kokoro"] = KokoroTTS(
             model_path=settings.kokoro_model_path,
             voices_path=settings.kokoro_voices_path,
             voice=settings.tts_voice,
             speed=settings.tts_speed,
             lang=LANGUAGE_CODES.get(settings.language, "en-us"),
         )
-        self.conversation = ConversationManager(max_turns=settings.max_conversation_turns)
+        backends["openai"] = OpenAITTS(
+            api_key=settings.openai_api_key,
+            model=settings.openai_tts_model,
+            voice=settings.openai_tts_voice,
+            speed=settings.tts_speed,
+        )
+        backends["fish"] = FishAudioTTS(
+            api_key=settings.fish_audio_api_key,
+            model_id=settings.fish_audio_model_id,
+            speed=settings.tts_speed,
+        )
+        return TTSManager(backends=backends, default=settings.tts_backend)
 
     async def handle_message(self, data: dict):
         """Route incoming WebSocket messages."""
@@ -99,6 +119,11 @@ class ConversationSession:
                 voice = data.get("voice", "")
                 if voice:
                     self.tts.set_voice(voice, self.language)
+            elif msg_type == "set_tts_backend":
+                backend = data.get("backend", "")
+                if backend and self.tts.set_backend(backend):
+                    await self._send_voices()
+                    await self._send({"type": "tts_backend_changed", "backend": backend})
             else:
                 logger.warning("Unknown message type: %s", msg_type)
         except Exception as e:
@@ -291,15 +316,18 @@ class ConversationSession:
         await self._send({"type": "status", "message": f"Language set to {language}"})
 
     async def _send_voices(self):
-        """Send available voices for the current language to the client."""
-        lang_voices = VOICES.get(self.language, {})
-        voice_list = []
-        for gender in ("female", "male"):
-            for vid in lang_voices.get(gender, []):
-                label = vid.split("_", 1)[1].title() + f" ({gender[0].upper()})"
-                voice_list.append({"id": vid, "label": label})
+        """Send available voices for the current backend + language to the client."""
+        voice_list = self.tts.get_voices(self.language)
         await self._send({
             "type": "voices",
             "voices": voice_list,
             "current": self.tts.voice,
+        })
+
+    async def _send_backends(self):
+        """Send available TTS backends to client."""
+        await self._send({
+            "type": "tts_backends",
+            "backends": self.tts.get_backend_names(),
+            "current": self.tts.active_backend,
         })

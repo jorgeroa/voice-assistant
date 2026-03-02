@@ -36,11 +36,20 @@ class AppSettings(BaseSettings):
     )
 
     # TTS
+    tts_backend: str = "kokoro"  # "kokoro", "openai", "fish"
     tts_voice_en: str = "af_heart"
     tts_voice_es: str = "ef_dora"
     tts_speed: float = 1.0
     kokoro_model_path: str = "models/kokoro-v1.0.onnx"
     kokoro_voices_path: str = "models/voices-v1.0.bin"
+
+    # OpenAI TTS
+    openai_tts_model: str = "tts-1"
+    openai_tts_voice: str = "nova"
+
+    # Fish Audio
+    fish_audio_api_key: str = ""
+    fish_audio_model_id: str = ""  # pre-made voice model ID
 
     # VAD
     vad_threshold: float = 0.5

@@ -5,13 +5,16 @@ from pathlib import Path
 
 import numpy as np
 
-from config.voices import LANGUAGE_CODES
+from config.voices import LANGUAGE_CODES, VOICES
+from core.tts_base import TTSBackend
 
 logger = logging.getLogger(__name__)
 
 
-class TextToSpeech:
+class KokoroTTS(TTSBackend):
     """Kokoro ONNX text-to-speech wrapper with batch and streaming support."""
+
+    name = "kokoro"
 
     def __init__(
         self,
@@ -69,3 +72,16 @@ class TextToSpeech:
         """Switch voice and language."""
         self.voice = voice
         self.lang = LANGUAGE_CODES.get(language, "en-us")
+
+    def get_voices(self, language: str) -> list[dict[str, str]]:
+        lang_voices = VOICES.get(language, {})
+        voice_list = []
+        for gender in ("female", "male"):
+            for vid in lang_voices.get(gender, []):
+                label = vid.split("_", 1)[1].title() + f" ({gender[0].upper()})"
+                voice_list.append({"id": vid, "label": label})
+        return voice_list
+
+
+# Backward-compatible alias
+TextToSpeech = KokoroTTS
